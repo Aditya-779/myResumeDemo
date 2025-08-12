@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PDF to Word Converter</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f4f4;
+            text-align: center;
+            padding: 50px;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            display: inline-block;
+            box-shadow: 0px 0px 10px rgba(0,0,0,0.1);
+        }
+        input[type="file"] {
+            margin: 20px 0;
+        }
+        button {
+            padding: 10px 20px;
+            background: #007BFF;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>PDF to Word Converter</h2>
+        <input type="file" id="pdfFile" accept="application/pdf">
+        <br>
+        <button onclick="convertPDF()">Convert to Word</button>
+        <p id="status"></p>
+    </div>
+
+    <script>
+        async function convertPDF() {
+            let fileInput = document.getElementById("pdfFile").files[0];
+            if (!fileInput) {
+                alert("Please select a PDF file first!");
+                return;
+            }
+
+            document.getElementById("status").innerText = "Converting...";
+
+            let formData = new FormData();
+            formData.append("file", fileInput);
+
+            try {
+                // Example using ConvertAPI
+                let apiKey = "YOUR_CONVERTAPI_KEY"; // Get from ConvertAPI.com
+                let response = await fetch(`https://v2.convertapi.com/convert/pdf/to/docx?Secret=${apiKey}`, {
+                    method: "POST",
+                    body: formData
+                });
+
+                let data = await response.json();
+                if (data.Files && data.Files.length > 0) {
+                    let downloadUrl = data.Files[0].Url;
+                    document.getElementById("status").innerHTML =
+                        `<a href="${downloadUrl}" target="_blank">Download Word File</a>`;
+                } else {
+                    document.getElementById("status").innerText = "Conversion failed.";
+                }
+            } catch (error) {
+                console.error(error);
+                document.getElementById("status").innerText = "Error converting file.";
+            }
+        }
+    </script>
+</body>
+</html>
