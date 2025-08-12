@@ -1,80 +1,186 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-    <title>PDF to Word Converter</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background: #f4f4f4;
-            text-align: center;
-            padding: 50px;
-        }
-        .container {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            display: inline-block;
-            box-shadow: 0px 0px 10px rgba(0,0,0,0.1);
-        }
-        input[type="file"] {
-            margin: 20px 0;
-        }
-        button {
-            padding: 10px 20px;
-            background: #007BFF;
-            color: white;
-            border: none;
-            cursor: pointer;
-            border-radius: 5px;
-        }
-        button:hover {
-            background: #0056b3;
-        }
-    </style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PDF → DOCX Converter (Client-side)</title>
+  <style>
+    :root{font-family:Inter,system-ui,Arial,Helvetica,sans-serif}
+    body{display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f6f8fb;color:#0f172a}
+    .card{width:900px;max-width:95%;background:#fff;border-radius:12px;box-shadow:0 6px 30px rgba(16,24,40,0.08);padding:20px}
+    h1{margin:0 0 8px;font-size:20px}
+    p.lead{margin:0 0 16px;color:#475569}
+    .drop{border:2px dashed #e2e8f0;border-radius:8px;padding:24px;text-align:center;cursor:pointer}
+    .controls{display:flex;gap:8px;margin-top:12px}
+    button{padding:10px 14px;border-radius:8px;border:0;background:#0ea5a4;color:white;font-weight:600;cursor:pointer}
+    button[disabled]{opacity:.5;cursor:not-allowed}
+    .info{margin-top:12px;color:#475569}
+    .progress{height:10px;background:#e6eef0;border-radius:6px;overflow:hidden;margin-top:12px}
+    .bar{height:100%;width:0;background:linear-gradient(90deg,#06b6d4,#0ea5a4)}
+    a.download{display:inline-block;margin-left:10px}
+    textarea{width:100%;height:160px;margin-top:12px;padding:10px;border:1px solid #e6eef0;border-radius:8px;font-family:monospace}
+    footer{margin-top:14px;color:#94a3b8;font-size:13px}
+  </style>
 </head>
 <body>
-    <div class="container">
-        <h2>PDF to Word Converter</h2>
-        <input type="file" id="pdfFile" accept="application/pdf">
-        <br>
-        <button onclick="convertPDF()">Convert to Word</button>
-        <p id="status"></p>
+  <div class="card">
+    <h1>PDF → DOCX Converter (Client-side)</h1>
+    <p class="lead">Select a PDF and convert to a Word (.docx) document entirely in the browser. No files leave the user's device.</p>
+
+    <label class="drop" id="dropzone">Click or drop a PDF here<br><small id="drop-hint">Supported: .pdf (text extraction)</small>
+      <input id="file-input" type="file" accept="application/pdf" style="display:none">
+    </label>
+
+    <div class="controls">
+      <button id="convertBtn" disabled>Convert to DOCX</button>
+      <button id="clearBtn" type="button">Clear</button>
+      <a id="downloadLink" class="download" style="display:none"></a>
     </div>
 
-    <script>
-        async function convertPDF() {
-            let fileInput = document.getElementById("pdfFile").files[0];
-            if (!fileInput) {
-                alert("Please select a PDF file first!");
-                return;
-            }
+    <div class="info">
+      <div id="fileInfo">No file chosen.</div>
+      <div class="progress" style="display:none"><div class="bar" id="progressBar"></div></div>
+      <textarea id="extractedText" placeholder="Extracted text preview (you can edit before exporting)..." spellcheck="false"></textarea>
+    </div>
 
-            document.getElementById("status").innerText = "Converting...";
+    <footer>Limitations: This extracts visible selectable text using PDF.js. Complex layouts, columns, tables, and embedded images may not convert perfectly. For faithful layout+images, use a server-side tool (LibreOffice, unoconv, or commercial APIs).</footer>
+  </div>
 
-            let formData = new FormData();
-            formData.append("file", fileInput);
+  <!-- Libraries from CDN -->
+  <!-- PDF.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+  <!-- docx (UMD build) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/docx/7.3.1/docx.umd.js"></script>
+  <!-- FileSaver (for saving files) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
 
-            try {
-                // Example using ConvertAPI
-                let apiKey = "YOUR_CONVERTAPI_KEY"; // Get from ConvertAPI.com
-                let response = await fetch(`https://v2.convertapi.com/convert/pdf/to/docx?Secret=${apiKey}`, {
-                    method: "POST",
-                    body: formData
-                });
+  <script>
+    // Basic UI bindings
+    const dropzone = document.getElementById('dropzone');
+    const input = document.getElementById('file-input');
+    const convertBtn = document.getElementById('convertBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const fileInfo = document.getElementById('fileInfo');
+    const progress = document.querySelector('.progress');
+    const progressBar = document.getElementById('progressBar');
+    const extractedText = document.getElementById('extractedText');
+    const downloadLink = document.getElementById('downloadLink');
 
-                let data = await response.json();
-                if (data.Files && data.Files.length > 0) {
-                    let downloadUrl = data.Files[0].Url;
-                    document.getElementById("status").innerHTML =
-                        `<a href="${downloadUrl}" target="_blank">Download Word File</a>`;
-                } else {
-                    document.getElementById("status").innerText = "Conversion failed.";
-                }
-            } catch (error) {
-                console.error(error);
-                document.getElementById("status").innerText = "Error converting file.";
-            }
-        }
-    </script>
+    let currentFile = null;
+
+    // PDF.js worker setup (uses the same CDN path pattern)
+    if (window['pdfjsLib']) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+    }
+
+    dropzone.addEventListener('click', ()=> input.click());
+    input.addEventListener('change', handleFiles);
+
+    dropzone.addEventListener('dragover', (e)=>{ e.preventDefault(); dropzone.style.borderColor = '#0ea5a4'; });
+    dropzone.addEventListener('dragleave', ()=>{ dropzone.style.borderColor = '#e2e8f0'; });
+    dropzone.addEventListener('drop', (e)=>{ e.preventDefault(); dropzone.style.borderColor = '#e2e8f0'; if (e.dataTransfer.files.length) handleFiles({target:{files:e.dataTransfer.files}}); });
+
+    clearBtn.addEventListener('click', ()=>{
+      currentFile = null; input.value=''; fileInfo.textContent='No file chosen.'; convertBtn.disabled = true; extractedText.value=''; downloadLink.style.display='none'; progress.style.display='none'; progressBar.style.width='0%';
+    });
+
+    convertBtn.addEventListener('click', async ()=>{
+      if (!currentFile) return;
+      convertBtn.disabled = true;
+      progress.style.display = 'block';
+      progressBar.style.width = '4%';
+
+      try {
+        const text = await extractTextFromPDF(currentFile, (p)=>{
+          progressBar.style.width = Math.floor(p*70) + '%';
+        });
+
+        // put text into textarea for manual edits
+        extractedText.value = text;
+        progressBar.style.width = '75%';
+
+        // create docx from text
+        progressBar.style.width = '78%';
+        await createDocxFromText(text, currentFile.name.replace(/\.pdf$/i,'') || 'converted', (p)=>{
+          progressBar.style.width = (78 + Math.floor(p*22)) + '%';
+        });
+
+        progressBar.style.width = '100%';
+      } catch (err) {
+        alert('Conversion failed: ' + (err.message || err));
+        console.error(err);
+      } finally {
+        convertBtn.disabled = false;
+      }
+    });
+
+    function handleFiles(e){
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.type !== 'application/pdf') {
+        alert('Please select a PDF file.');
+        return;
+      }
+      currentFile = file;
+      fileInfo.textContent = `Selected: ${file.name} — ${Math.round(file.size/1024)} KB`;
+      convertBtn.disabled = false;
+      extractedText.value = '';
+      downloadLink.style.display = 'none';
+    }
+
+    // Extract selectable text from PDF using PDF.js
+    async function extractTextFromPDF(file, onProgress = ()=>{}){
+      const arrayBuffer = await file.arrayBuffer();
+      const loadingTask = pdfjsLib.getDocument({data:arrayBuffer});
+      const pdf = await loadingTask.promise;
+      const numPages = pdf.numPages;
+      let fullText = '';
+      for (let i=1;i<=numPages;i++){
+        onProgress(i/numPages);
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items.map(i=>i.str).join(' ');
+        fullText += pageText + '\n\n';
+      }
+      return fullText.trim();
+    }
+
+    // Create a .docx using the `docx` library
+    async function createDocxFromText(text, baseName = 'converted', onProgress = ()=>{}){
+      // `docx` library is available as window.docx
+      const {Document, Paragraph, Packer, TextRun} = window.docx;
+
+      // Break into paragraphs by line breaks (simple approach)
+      const paragraphs = text.split(/\n{1,}/g).map(p => p.trim()).filter(Boolean);
+
+      const doc = new Document({sections:[{properties:{},children:[]}]});
+
+      for (let i=0;i<paragraphs.length;i++){
+        // Create a paragraph; for large documents you might want to batch
+        const p = new Paragraph({children:[new TextRun(paragraphs[i])]});
+        doc.addSection({children:[p]});
+        // Report a small progress measure
+        if (i % 10 === 0) onProgress(i / paragraphs.length);
+      }
+
+      onProgress(0.9);
+      const blob = await Packer.toBlob(doc);
+      onProgress(1);
+
+      // Offer to download using FileSaver
+      saveAs(blob, baseName + '.docx');
+
+      // Also expose a download link in the UI
+      const url = URL.createObjectURL(blob);
+      downloadLink.href = url;
+      downloadLink.download = baseName + '.docx';
+      downloadLink.textContent = 'Download DOCX';
+      downloadLink.style.display = 'inline-block';
+
+      // Clean up objectURL after user downloads (optional)
+      downloadLink.onclick = ()=> setTimeout(()=> URL.revokeObjectURL(url), 15000);
+    }
+
+  </script>
 </body>
 </html>
